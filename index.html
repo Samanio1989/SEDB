@@ -60,10 +60,27 @@ let APP={records:[],dashboard:{},filters:{}};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]));
 
+const API_URL='https://script.google.com/macros/s/AKfycbzXfesStSP2RJ1ATUEv7h3keLiwsLnQZmupU7HSVaOwmyaO82jmXyFTsNcZYksepxYZ_A/exec';
+let apiTimer;
 function init(){
-  google.script.run.withSuccessHandler(data=>{APP=data; renderAll(); $('loading').style.display='none';})
-    .withFailureHandler(err=>{ $('loading').innerHTML='<div style="max-width:600px;padding:30px"><h2>ไม่สามารถโหลดข้อมูลได้</h2><p>'+esc(err.message||err)+'</p></div>'; })
-    .getAppData();
+  // ใช้ JSONP เพื่อให้ GitHub Pages เรียก Google Apps Script ข้ามโดเมนได้โดยไม่ติด CORS
+  window.__receiveCommunityData=function(data){
+    clearTimeout(apiTimer);
+    try{
+      if(!data || !Array.isArray(data.records)) throw new Error('รูปแบบข้อมูลจาก API ไม่ถูกต้อง');
+      APP=data; renderAll(); $('loading').style.display='none';
+    }catch(err){ showLoadError(err); }
+  };
+  const script=document.createElement('script');
+  script.src=API_URL+'?callback=__receiveCommunityData&t='+Date.now();
+  script.async=true;
+  script.onerror=()=>showLoadError(new Error('เชื่อมต่อ Google Apps Script ไม่สำเร็จ'));
+  document.head.appendChild(script);
+  apiTimer=setTimeout(()=>showLoadError(new Error('หมดเวลารอข้อมูลจาก Google Apps Script')),20000);
+}
+function showLoadError(err){
+  clearTimeout(apiTimer);
+  $('loading').innerHTML='<div style="max-width:680px;padding:30px;text-align:center"><h2>ไม่สามารถโหลดข้อมูลได้</h2><p>'+esc(err.message||err)+'</p><p class="muted">ตรวจสอบว่า Google Apps Script ได้ Deploy เป็น Web app และตั้ง Who has access เป็น Anyone จากนั้น Deploy เวอร์ชันล่าสุด</p><button class="btn btn-primary" onclick="location.reload()">ลองใหม่</button></div>';
 }
 function renderAll(){
   $('appTitle').textContent=APP.appTitle; $('updatedAt').textContent='อัปเดตข้อมูล: '+APP.updatedAt;
@@ -99,15 +116,16 @@ function resetFilters(){['q','province','target','issue'].forEach(id=>$(id).valu
 function renderCards(records){
   $('resultCount').textContent=`พบ ${records.length.toLocaleString('th-TH')} รายการ จากทั้งหมด ${APP.records.length.toLocaleString('th-TH')} รายการ`;
   if(!records.length){$('cards').innerHTML='<div class="panel empty" style="grid-column:1/-1">ไม่พบข้อมูลที่ตรงกับเงื่อนไขการค้นหา</div>';return}
-  $('cards').innerHTML=records.map(r=>`<article class="card"><div><h3>${esc(r.areaName||'ไม่ระบุชื่อพื้นที่')}</h3><div class="location">📍 ${esc(r.location||'-')}</div></div><div class="meta"><span class="badge">👥 ${esc(r.targetGroup||'ไม่ระบุ')}</span><span class="badge">🗺️ ${esc(r.province||'ไม่ระบุจังหวัด')}</span>${r.issueTags.map(x=>`<span class="badge issue">${esc(x)}</span>`).join('')}</div><div class="muted">ลงพื้นที่: ${esc(r.visitDate||'-')} · ผู้เก็บข้อมูล: ${esc(r.collector||'-')}</div><div class="actions"><button class="btn btn-primary" onclick="showDetail(${r.id})">ดูรายละเอียดทั้งหมด</button>${r.driveLink?`<a class="btn btn-drive" href="${esc(r.driveLink)}" target="_blank" rel="noopener">📁 เอกสารประกอบ</a>`:''}</div></article>`).join('');
+  $('cards').innerHTML=records.map(r=>`<article class="card"><div><h3>${esc(r.areaName||'ไม่ระบุชื่อพื้นที่')}</h3><div class="location">📍 ${esc(r.location||'-')}</div></div><div class="meta"><span class="badge">👥 ${esc(r.targetGroup||'ไม่ระบุ')}</span><span class="badge">🗺️ ${esc(r.province||'ไม่ระบุจังหวัด')}</span>${r.issueTags.map(x=>`<span class="badge issue">${esc(x)}</span>`).join('')}</div><div class="muted">ลงพื้นที่: ${esc(r.visitDate||'-')} · ผู้เก็บข้อมูล: ${esc(r.collector||'-')}</div><div class="actions"><button class="btn btn-primary" onclick="openDetail(${r.id})">ดูรายละเอียด</button>${r.driveLink?`<a class="btn btn-drive" target="_blank" rel="noopener" href="${esc(r.driveLink)}">📁 เอกสารประกอบ</a>`:''}</div></article>`).join('');
 }
-function showDetail(id){
-  const r=APP.records.find(x=>x.id===id); if(!r)return; $('modalTitle').textContent=r.areaName||'ข้อมูลพื้นที่';
-  const fields=[['ชื่อ-สกุล ผู้เก็บข้อมูล',r.collector],['เบอร์โทรศัพท์ติดต่อ',r.phone],['ผู้ให้ข้อมูลหลัก',r.informant],['ชื่อพื้นที่ดำเนินการ',r.areaName],['กลุ่มเป้าหมาย',r.targetGroup],['ที่ตั้งพื้นที่',r.location],['จังหวัด',r.province],['วันที่ลงพื้นที่',r.visitDate],['ประเด็นปัญหาหลักของพื้นที่',r.issue],['ลักษณะทั่วไปของพื้นที่',r.general,true],['ปัญหาหลักของพื้นที่ และวิเคราะห์สาเหตุของปัญหา',r.problemAnalysis,true],['ความต้องการของพื้นที่',r.needs,true],['ข้อมูลนาฬิกาชีวิต',r.lifeClock,true],['ลักษณะการดำเนินงานของพื้นที่ในอดีตและปัจจุบัน',r.pastPresent,true],['เหตุการณ์สำคัญที่ทำให้เกิดการเปลี่ยนแปลงในการดำเนินงาน',r.turningPoint,true],['ปัญหาที่เกิดขึ้นในปัจจุบัน',r.currentProblem,true],['ปัจจุบันสถานการณ์ของพื้นที่',r.currentSituation,true],['หน่วยงานที่เข้ามาดำเนินการในพื้นที่',r.agencies,true]];
-  $('modalBody').innerHTML=`<div class="detail-grid">${fields.map(([l,v,full])=>`<div class="detail ${full?'full':''}"><label>${esc(l)}</label><div>${esc(v||'-')}</div></div>`).join('')}${r.driveLink?`<div class="detail full"><label>แหล่งที่มาของข้อมูลดิบ / เอกสารประกอบ</label><a class="btn btn-drive" href="${esc(r.driveLink)}" target="_blank" rel="noopener">📁 เปิด Link Google Drive เอกสารประกอบ</a></div>`:''}</div>`;
-  detailModal.showModal();
+function openDetail(id){
+  const r=APP.records.find(x=>x.id===id); if(!r)return; $('modalTitle').textContent=r.areaName||'รายละเอียดพื้นที่';
+  const details=[['ชื่อ-สกุล ผู้เก็บข้อมูล',r.collector],['เบอร์โทรศัพท์ติดต่อ',r.phone],['ผู้ให้ข้อมูลหลัก',r.informant],['ชื่อพื้นที่ดำเนินการ',r.areaName],['กลุ่มเป้าหมาย',r.targetGroup],['ที่ตั้งพื้นที่',r.location],['จังหวัด',r.province],['วันที่ลงพื้นที่',r.visitDate],['ประเด็นปัญหาหลักของพื้นที่',r.issue],['ลักษณะทั่วไปของพื้นที่',r.general,true],['ปัญหาหลักของพื้นที่ และวิเคราะห์สาเหตุของปัญหา',r.problemAnalysis,true],['ความต้องการของพื้นที่',r.needs,true],['ข้อมูลนาฬิกาชีวิต',r.lifeClock,true],['ลักษณะการดำเนินงานของพื้นที่ในอดีตและปัจจุบัน',r.pastPresent,true],['เหตุการณ์สำคัญที่ทำให้เกิดการเปลี่ยนแปลงในการดำเนินงาน',r.turningPoint,true],['ปัญหาที่เกิดขึ้นในปัจจุบัน เริ่มตั้งแต่เมื่อใด และลักษณะของปัญหา',r.currentProblem,true],['ปัจจุบันสถานการณ์ของพื้นที่',r.currentSituation,true],['หน่วยงานที่เข้ามาดำเนินการในพื้นที่',r.agencies,true]];
+  $('modalBody').innerHTML=`<div class="detail-grid">${details.map(([l,v,full])=>`<div class="detail ${full?'full':''}"><label>${esc(l)}</label><div>${esc(v||'-')}</div></div>`).join('')}<div class="detail full"><label>แหล่งข้อมูลดิบ / เอกสารประกอบ</label><div>${r.driveLink?`<a class="btn btn-drive" target="_blank" rel="noopener" href="${esc(r.driveLink)}">📁 เปิด Google Drive เอกสารประกอบ</a>`:'ไม่พบ Link Google Drive ในรายการนี้'}</div></div></div>`;
+  $('detailModal').showModal();
 }
-window.addEventListener('DOMContentLoaded',init);
+document.addEventListener('DOMContentLoaded',init);
+detailModal.addEventListener('click',e=>{if(e.target===detailModal)detailModal.close()});
 </script>
 </body>
 </html>
