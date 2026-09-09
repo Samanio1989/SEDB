@@ -1,0 +1,1 @@
+High-resolution header asset is managed as assets/header-ayutthaya-angthong-3000.avif (3000x1200).
